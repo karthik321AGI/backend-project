@@ -12,19 +12,33 @@ const wss = new WebSocket.Server({ server });
 let availableSpeakers = [];
 let waitingClients = [];
 
+function logState() {
+  console.log(`Available speakers: ${availableSpeakers.length}, Waiting clients: ${waitingClients.length}`);
+}
+
 function checkWaitingClients() {
+  console.log('Checking waiting clients...');
   while (waitingClients.length > 0 && availableSpeakers.length > 0) {
     const client = waitingClients.shift();
-    const speaker = availableSpeakers.pop();
-    client.send(JSON.stringify({ type: 'speaker_connected' }));
-    speaker.send(JSON.stringify({ type: 'client_connected' }));
+    const speaker = availableSpeakers.shift();
+    if (client.readyState === WebSocket.OPEN && speaker.readyState === WebSocket.OPEN) {
+      console.log('Pairing a client with a speaker');
+      client.send(JSON.stringify({ type: 'speaker_connected' }));
+      speaker.send(JSON.stringify({ type: 'client_connected' }));
+    } else {
+      console.log('Client or speaker disconnected before pairing');
+      if (client.readyState === WebSocket.OPEN) waitingClients.unshift(client);
+      if (speaker.readyState === WebSocket.OPEN) availableSpeakers.unshift(speaker);
+    }
   }
+  logState();
 }
 
 setInterval(checkWaitingClients, 5000); // Check every 5 seconds
 
 wss.on('connection', (ws) => {
   console.log('New WebSocket connection');
+  logState();
 
   ws.on('message', (message) => {
     try {
@@ -33,25 +47,31 @@ wss.on('connection', (ws) => {
 
       if (data.type === 'request_speaker') {
         if (availableSpeakers.length > 0) {
-          const speaker = availableSpeakers.pop();
+          const speaker = availableSpeakers.shift();
+          console.log('Pairing client with available speaker');
           ws.send(JSON.stringify({ type: 'speaker_connected' }));
           speaker.send(JSON.stringify({ type: 'client_connected' }));
         } else {
+          console.log('No available speakers, adding client to waiting list');
           waitingClients.push(ws);
           ws.send(JSON.stringify({ type: 'waiting_for_speaker' }));
         }
       } else if (data.type === 'available_as_speaker') {
         if (waitingClients.length > 0) {
           const client = waitingClients.shift();
+          console.log('Pairing available speaker with waiting client');
           client.send(JSON.stringify({ type: 'speaker_connected' }));
           ws.send(JSON.stringify({ type: 'client_connected' }));
         } else {
+          console.log('No waiting clients, adding speaker to available list');
           availableSpeakers.push(ws);
         }
       } else if (data.type === 'end_call') {
-        // Handle call ending logic
         console.log('Call ended');
+        // Optionally, you can add the speaker back to the available list
+        availableSpeakers.push(ws);
       }
+      logState();
     } catch (error) {
       console.error('Error parsing message:', error);
     }
@@ -61,6 +81,7 @@ wss.on('connection', (ws) => {
     console.log('WebSocket connection closed');
     availableSpeakers = availableSpeakers.filter(speaker => speaker !== ws);
     waitingClients = waitingClients.filter(client => client !== ws);
+    logState();
   });
 });
 
