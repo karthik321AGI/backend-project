@@ -9,35 +9,31 @@ app.use(cors());
 const server = http.createServer(app);
 const wss = new WebSocket.Server({ server });
 
-let availableSpeakers = [];
-let waitingClients = [];
+let waitingUsers = [];
 let activeCalls = new Map();
 
 function logState() {
-  console.log(`Available speakers: ${availableSpeakers.length}, Waiting clients: ${waitingClients.length}, Active calls: ${activeCalls.size}`);
+  console.log(`Waiting users: ${waitingUsers.length}, Active calls: ${activeCalls.size}`);
 }
 
-function checkWaitingClients() {
-  console.log('Checking waiting clients...');
-  while (waitingClients.length > 0 && availableSpeakers.length > 0) {
-    const client = waitingClients.shift();
-    const speaker = availableSpeakers.shift();
-    if (client.readyState === WebSocket.OPEN && speaker.readyState === WebSocket.OPEN) {
-      console.log('Pairing a client with a speaker');
-      client.send(JSON.stringify({ type: 'speaker_connected' }));
-      speaker.send(JSON.stringify({ type: 'client_connected' }));
-      activeCalls.set(client, speaker);
-      activeCalls.set(speaker, client);
+function pairUsers() {
+  while (waitingUsers.length >= 2) {
+    const user1 = waitingUsers.shift();
+    const user2 = waitingUsers.shift();
+    if (user1.readyState === WebSocket.OPEN && user2.readyState === WebSocket.OPEN) {
+      console.log('Pairing two users');
+      user1.send(JSON.stringify({ type: 'connection_established', initiator: true }));
+      user2.send(JSON.stringify({ type: 'connection_established', initiator: false }));
+      activeCalls.set(user1, user2);
+      activeCalls.set(user2, user1);
     } else {
-      console.log('Client or speaker disconnected before pairing');
-      if (client.readyState === WebSocket.OPEN) waitingClients.unshift(client);
-      if (speaker.readyState === WebSocket.OPEN) availableSpeakers.unshift(speaker);
+      console.log('One or both users disconnected before pairing');
+      if (user1.readyState === WebSocket.OPEN) waitingUsers.unshift(user1);
+      if (user2.readyState === WebSocket.OPEN) waitingUsers.unshift(user2);
     }
   }
   logState();
 }
-
-setInterval(checkWaitingClients, 5000); // Check every 5 seconds
 
 wss.on('connection', (ws) => {
   console.log('New WebSocket connection');
@@ -49,31 +45,18 @@ wss.on('connection', (ws) => {
       console.log('Received message:', data);
 
       switch (data.type) {
-        case 'request_speaker':
-          if (availableSpeakers.length > 0) {
-            const speaker = availableSpeakers.shift();
-            console.log('Pairing client with available speaker');
-            ws.send(JSON.stringify({ type: 'speaker_connected' }));
-            speaker.send(JSON.stringify({ type: 'client_connected' }));
-            activeCalls.set(ws, speaker);
-            activeCalls.set(speaker, ws);
+        case 'request_connection':
+          if (waitingUsers.length > 0) {
+            const peer = waitingUsers.shift();
+            console.log('Pairing user with waiting user');
+            ws.send(JSON.stringify({ type: 'connection_established', initiator: true }));
+            peer.send(JSON.stringify({ type: 'connection_established', initiator: false }));
+            activeCalls.set(ws, peer);
+            activeCalls.set(peer, ws);
           } else {
-            console.log('No available speakers, adding client to waiting list');
-            waitingClients.push(ws);
-            ws.send(JSON.stringify({ type: 'waiting_for_speaker' }));
-          }
-          break;
-        case 'available_as_speaker':
-          if (waitingClients.length > 0) {
-            const client = waitingClients.shift();
-            console.log('Pairing available speaker with waiting client');
-            client.send(JSON.stringify({ type: 'speaker_connected' }));
-            ws.send(JSON.stringify({ type: 'client_connected' }));
-            activeCalls.set(client, ws);
-            activeCalls.set(ws, client);
-          } else {
-            console.log('No waiting clients, adding speaker to available list');
-            availableSpeakers.push(ws);
+            console.log('No waiting users, adding user to waiting list');
+            waitingUsers.push(ws);
+            ws.send(JSON.stringify({ type: 'waiting_for_peer' }));
           }
           break;
         case 'offer':
@@ -102,8 +85,7 @@ wss.on('connection', (ws) => {
 
   ws.on('close', () => {
     console.log('WebSocket connection closed');
-    availableSpeakers = availableSpeakers.filter(speaker => speaker !== ws);
-    waitingClients = waitingClients.filter(client => client !== ws);
+    waitingUsers = waitingUsers.filter(user => user !== ws);
     const peer = activeCalls.get(ws);
     if (peer) {
       activeCalls.delete(ws);
@@ -113,6 +95,9 @@ wss.on('connection', (ws) => {
     logState();
   });
 });
+
+// Periodically check and pair waiting users
+setInterval(pairUsers, 1000);
 
 server.listen(process.env.PORT || 3000, () => {
   console.log(`Server is running on port ${server.address().port}`);
