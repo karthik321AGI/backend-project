@@ -1,105 +1,101 @@
 const express = require('express');
-const WebSocket = require('ws');
 const http = require('http');
-const cors = require('cors');
+const WebSocket = require('ws');
 const { v4: uuidv4 } = require('uuid');
 
 const app = express();
-app.use(cors());
-
 const server = http.createServer(app);
 const wss = new WebSocket.Server({ server });
 
-let rooms = new Map();
+const rooms = new Map();
 
-function logState() {
-  console.log(`Active rooms: ${rooms.size}`);
-  rooms.forEach((room, roomId) => {
-    console.log(`Room ${roomId}: ${room.size} participants`);
-  });
+function sendTo(ws, message) {
+  ws.send(JSON.stringify(message));
 }
 
 wss.on('connection', (ws) => {
-  console.log('New WebSocket connection');
-  logState();
+  console.log('New client connected');
+  ws.id = uuidv4();
 
   ws.on('message', (message) => {
+    let data;
     try {
-      const data = JSON.parse(message);
-      console.log('Received message:', data);
+      data = JSON.parse(message);
+    } catch (e) {
+      console.error("Invalid JSON");
+      data = {};
+    }
 
-      switch (data.type) {
-        case 'create_room':
-          const roomId = uuidv4();
-          rooms.set(roomId, new Set([ws]));
-          ws.roomId = roomId;
-          ws.send(JSON.stringify({ type: 'room_created', roomId }));
-          break;
+    console.log('Received message:', data);
 
-        case 'join_room':
-          const room = rooms.get(data.roomId);
-          if (room) {
-            room.add(ws);
-            ws.roomId = data.roomId;
-            ws.send(JSON.stringify({ type: 'room_joined', roomId: data.roomId }));
-            room.forEach(participant => {
-              if (participant !== ws) {
-                participant.send(JSON.stringify({ type: 'new_participant', id: ws.id }));
-              }
-            });
-          } else {
-            ws.send(JSON.stringify({ type: 'error', message: 'Room not found' }));
-          }
-          break;
+    switch (data.type) {
+      case 'create_room':
+        const roomId = uuidv4();
+        rooms.set(roomId, new Set([ws]));
+        ws.roomId = roomId;
+        sendTo(ws, { type: 'room_created', roomId, participants: 1 });
+        console.log(`Room created: ${roomId}`);
+        break;
 
-        case 'offer':
-        case 'answer':
-        case 'ice_candidate':
-          const targetRoom = rooms.get(ws.roomId);
-          if (targetRoom) {
-            targetRoom.forEach(participant => {
-              if (participant !== ws) {
-                participant.send(JSON.stringify({ ...data, senderId: ws.id }));
-              }
-            });
-          }
-          break;
+      case 'join_room':
+        const room = rooms.get(data.roomId);
+        if (room) {
+          room.add(ws);
+          ws.roomId = data.roomId;
+          sendTo(ws, { type: 'room_joined', roomId: data.roomId, participants: room.size });
+          room.forEach(client => {
+            if (client !== ws) {
+              sendTo(client, { type: 'new_participant', id: ws.id });
+            }
+          });
+          console.log(`User ${ws.id} joined room ${data.roomId}`);
+        } else {
+          sendTo(ws, { type: 'error', message: 'Room not found' });
+        }
+        break;
 
-        case 'leave_room':
-          handleParticipantLeave(ws);
-          break;
-      }
-      logState();
-    } catch (error) {
-      console.error('Error parsing message:', error);
+      case 'offer':
+      case 'answer':
+      case 'ice_candidate':
+        const targetRoom = rooms.get(ws.roomId);
+        if (targetRoom) {
+          targetRoom.forEach(client => {
+            if (client !== ws && client.id === data.targetId) {
+              sendTo(client, { ...data, senderId: ws.id });
+            }
+          });
+        }
+        break;
+
+      case 'leave_room':
+        handleLeaveRoom(ws);
+        break;
     }
   });
 
   ws.on('close', () => {
-    console.log('WebSocket connection closed');
-    handleParticipantLeave(ws);
-    logState();
+    console.log('Client disconnected');
+    handleLeaveRoom(ws);
   });
-
-  // Assign a unique ID to each connection
-  ws.id = uuidv4();
 });
 
-function handleParticipantLeave(ws) {
+function handleLeaveRoom(ws) {
   const room = rooms.get(ws.roomId);
   if (room) {
     room.delete(ws);
     if (room.size === 0) {
       rooms.delete(ws.roomId);
+      console.log(`Room ${ws.roomId} deleted`);
     } else {
-      room.forEach(participant => {
-        participant.send(JSON.stringify({ type: 'participant_left', id: ws.id }));
+      room.forEach(client => {
+        sendTo(client, { type: 'participant_left', id: ws.id, participants: room.size });
       });
     }
   }
   delete ws.roomId;
 }
 
-server.listen(process.env.PORT || 3000, () => {
-  console.log(`Server is running on port ${server.address().port}`);
+const PORT = process.env.PORT || 3000;
+server.listen(PORT, () => {
+  console.log(`Server is running on port ${PORT}`);
 });
