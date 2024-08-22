@@ -13,6 +13,17 @@ function sendTo(ws, message) {
   ws.send(JSON.stringify(message));
 }
 
+function broadcastToRoom(roomId, message, excludeClient = null) {
+  const room = rooms.get(roomId);
+  if (room) {
+    room.forEach(client => {
+      if (client !== excludeClient && client.readyState === WebSocket.OPEN) {
+        sendTo(client, message);
+      }
+    });
+  }
+}
+
 wss.on('connection', (ws) => {
   console.log('New client connected');
   ws.id = uuidv4();
@@ -43,11 +54,7 @@ wss.on('connection', (ws) => {
           room.add(ws);
           ws.roomId = data.roomId;
           sendTo(ws, { type: 'room_joined', roomId: data.roomId, participants: room.size });
-          room.forEach(client => {
-            if (client !== ws) {
-              sendTo(client, { type: 'new_participant', id: ws.id });
-            }
-          });
+          broadcastToRoom(data.roomId, { type: 'new_participant', id: ws.id, participants: room.size }, ws);
           console.log(`User ${ws.id} joined room ${data.roomId}`);
         } else {
           sendTo(ws, { type: 'error', message: 'Room not found' });
@@ -87,9 +94,7 @@ function handleLeaveRoom(ws) {
       rooms.delete(ws.roomId);
       console.log(`Room ${ws.roomId} deleted`);
     } else {
-      room.forEach(client => {
-        sendTo(client, { type: 'participant_left', id: ws.id, participants: room.size });
-      });
+      broadcastToRoom(ws.roomId, { type: 'participant_left', id: ws.id, participants: room.size });
     }
   }
   delete ws.roomId;
