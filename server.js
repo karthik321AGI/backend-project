@@ -2,6 +2,7 @@ const express = require('express');
 const WebSocket = require('ws');
 const http = require('http');
 const cors = require('cors');
+const { v4: uuidv4 } = require('uuid');
 
 const app = express();
 app.use(cors());
@@ -9,30 +10,13 @@ app.use(cors());
 const server = http.createServer(app);
 const wss = new WebSocket.Server({ server });
 
-let waitingUsers = [];
-let activeCalls = new Map();
+let rooms = new Map();
 
 function logState() {
-  console.log(`Waiting users: ${waitingUsers.length}, Active calls: ${activeCalls.size}`);
-}
-
-function pairUsers() {
-  while (waitingUsers.length >= 2) {
-    const user1 = waitingUsers.shift();
-    const user2 = waitingUsers.shift();
-    if (user1.readyState === WebSocket.OPEN && user2.readyState === WebSocket.OPEN) {
-      console.log('Pairing two users');
-      user1.send(JSON.stringify({ type: 'connection_established', initiator: true }));
-      user2.send(JSON.stringify({ type: 'connection_established', initiator: false }));
-      activeCalls.set(user1, user2);
-      activeCalls.set(user2, user1);
-    } else {
-      console.log('One or both users disconnected before pairing');
-      if (user1.readyState === WebSocket.OPEN) waitingUsers.unshift(user1);
-      if (user2.readyState === WebSocket.OPEN) waitingUsers.unshift(user2);
-    }
-  }
-  logState();
+  console.log(`Active rooms: ${rooms.size}`);
+  rooms.forEach((room, roomId) => {
+    console.log(`Room ${roomId}: ${room.size} participants`);
+  });
 }
 
 wss.on('connection', (ws) => {
@@ -45,36 +29,44 @@ wss.on('connection', (ws) => {
       console.log('Received message:', data);
 
       switch (data.type) {
-        case 'request_connection':
-          if (waitingUsers.length > 0) {
-            const peer = waitingUsers.shift();
-            console.log('Pairing user with waiting user');
-            ws.send(JSON.stringify({ type: 'connection_established', initiator: true }));
-            peer.send(JSON.stringify({ type: 'connection_established', initiator: false }));
-            activeCalls.set(ws, peer);
-            activeCalls.set(peer, ws);
+        case 'create_room':
+          const roomId = uuidv4();
+          rooms.set(roomId, new Set([ws]));
+          ws.roomId = roomId;
+          ws.send(JSON.stringify({ type: 'room_created', roomId }));
+          break;
+
+        case 'join_room':
+          const room = rooms.get(data.roomId);
+          if (room) {
+            room.add(ws);
+            ws.roomId = data.roomId;
+            ws.send(JSON.stringify({ type: 'room_joined', roomId: data.roomId }));
+            room.forEach(participant => {
+              if (participant !== ws) {
+                participant.send(JSON.stringify({ type: 'new_participant', id: ws.id }));
+              }
+            });
           } else {
-            console.log('No waiting users, adding user to waiting list');
-            waitingUsers.push(ws);
-            ws.send(JSON.stringify({ type: 'waiting_for_peer' }));
+            ws.send(JSON.stringify({ type: 'error', message: 'Room not found' }));
           }
           break;
+
         case 'offer':
         case 'answer':
         case 'ice_candidate':
-          const peer = activeCalls.get(ws);
-          if (peer) {
-            peer.send(JSON.stringify(data));
+          const targetRoom = rooms.get(ws.roomId);
+          if (targetRoom) {
+            targetRoom.forEach(participant => {
+              if (participant !== ws) {
+                participant.send(JSON.stringify({ ...data, senderId: ws.id }));
+              }
+            });
           }
           break;
-        case 'end_call':
-          console.log('Call ended');
-          const callPeer = activeCalls.get(ws);
-          if (callPeer) {
-            activeCalls.delete(ws);
-            activeCalls.delete(callPeer);
-            callPeer.send(JSON.stringify({ type: 'call_ended' }));
-          }
+
+        case 'leave_room':
+          handleParticipantLeave(ws);
           break;
       }
       logState();
@@ -85,19 +77,28 @@ wss.on('connection', (ws) => {
 
   ws.on('close', () => {
     console.log('WebSocket connection closed');
-    waitingUsers = waitingUsers.filter(user => user !== ws);
-    const peer = activeCalls.get(ws);
-    if (peer) {
-      activeCalls.delete(ws);
-      activeCalls.delete(peer);
-      peer.send(JSON.stringify({ type: 'call_ended' }));
-    }
+    handleParticipantLeave(ws);
     logState();
   });
+
+  // Assign a unique ID to each connection
+  ws.id = uuidv4();
 });
 
-// Periodically check and pair waiting users
-setInterval(pairUsers, 1000);
+function handleParticipantLeave(ws) {
+  const room = rooms.get(ws.roomId);
+  if (room) {
+    room.delete(ws);
+    if (room.size === 0) {
+      rooms.delete(ws.roomId);
+    } else {
+      room.forEach(participant => {
+        participant.send(JSON.stringify({ type: 'participant_left', id: ws.id }));
+      });
+    }
+  }
+  delete ws.roomId;
+}
 
 server.listen(process.env.PORT || 3000, () => {
   console.log(`Server is running on port ${server.address().port}`);
