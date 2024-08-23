@@ -58,6 +58,7 @@ wss.on('connection', (ws) => {
           console.log(`User ${ws.id} joined room ${data.roomId}`);
         } else {
           sendTo(ws, { type: 'error', message: 'Room not found' });
+          console.log(`Failed to join room: ${data.roomId} - Room not found`);
         }
         break;
 
@@ -69,6 +70,7 @@ wss.on('connection', (ws) => {
           targetRoom.forEach(client => {
             if (client !== ws && client.id === data.targetId) {
               sendTo(client, { ...data, senderId: ws.id });
+              console.log(`Forwarded ${data.type} from ${ws.id} to ${data.targetId}`);
             }
           });
         }
@@ -80,6 +82,7 @@ wss.on('connection', (ws) => {
           restartRoom.forEach(client => {
             if (client !== ws && client.id === data.targetId) {
               sendTo(client, { type: 'ice_restart', senderId: ws.id });
+              console.log(`ICE restart request sent from ${ws.id} to ${data.targetId}`);
             }
           });
         }
@@ -91,6 +94,7 @@ wss.on('connection', (ws) => {
           holePunchRoom.forEach(client => {
             if (client !== ws) {
               sendTo(client, { type: 'hole_punch_start', targetId: ws.id });
+              console.log(`Hole punch start request sent from ${ws.id} to ${client.id}`);
             }
           });
         }
@@ -102,6 +106,7 @@ wss.on('connection', (ws) => {
           relayRoom.forEach(client => {
             if (client.id === data.targetId) {
               sendTo(client, { type: 'relayed_message', message: data.message, senderId: ws.id });
+              console.log(`Relayed message from ${ws.id} to ${data.targetId}`);
             }
           });
         }
@@ -110,11 +115,14 @@ wss.on('connection', (ws) => {
       case 'leave_room':
         handleLeaveRoom(ws);
         break;
+
+      default:
+        console.log(`Unhandled message type: ${data.type}`);
     }
   });
 
   ws.on('close', () => {
-    console.log('Client disconnected');
+    console.log(`Client ${ws.id} disconnected`);
     handleLeaveRoom(ws);
   });
 });
@@ -123,11 +131,13 @@ function handleLeaveRoom(ws) {
   const room = rooms.get(ws.roomId);
   if (room) {
     room.delete(ws);
+    console.log(`User ${ws.id} left room ${ws.roomId}`);
     if (room.size === 0) {
       rooms.delete(ws.roomId);
       console.log(`Room ${ws.roomId} deleted`);
     } else {
       broadcastToRoom(ws.roomId, { type: 'participant_left', id: ws.id, participants: room.size });
+      console.log(`Notified remaining participants in room ${ws.roomId}`);
     }
   }
   delete ws.roomId;
