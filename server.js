@@ -85,6 +85,28 @@ wss.on('connection', (ws) => {
         }
         break;
 
+      case 'start_hole_punch':
+        const holePunchRoom = rooms.get(ws.roomId);
+        if (holePunchRoom) {
+          holePunchRoom.forEach(client => {
+            if (client !== ws) {
+              sendTo(client, { type: 'hole_punch_start', targetId: ws.id });
+            }
+          });
+        }
+        break;
+
+      case 'relay_message':
+        const relayRoom = rooms.get(ws.roomId);
+        if (relayRoom) {
+          relayRoom.forEach(client => {
+            if (client.id === data.targetId) {
+              sendTo(client, { type: 'relayed_message', message: data.message, senderId: ws.id });
+            }
+          });
+        }
+        break;
+
       case 'leave_room':
         handleLeaveRoom(ws);
         break;
