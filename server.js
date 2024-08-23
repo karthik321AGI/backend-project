@@ -74,6 +74,17 @@ wss.on('connection', (ws) => {
         }
         break;
 
+      case 'ice_restart':
+        const restartRoom = rooms.get(ws.roomId);
+        if (restartRoom) {
+          restartRoom.forEach(client => {
+            if (client !== ws && client.id === data.targetId) {
+              sendTo(client, { type: 'ice_restart', senderId: ws.id });
+            }
+          });
+        }
+        break;
+
       case 'leave_room':
         handleLeaveRoom(ws);
         break;
