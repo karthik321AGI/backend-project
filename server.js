@@ -40,62 +40,37 @@ wss.on('connection', (ws) => {
     console.log('Received message:', data);
 
     switch (data.type) {
-      case 'get_rooms':
-        const roomsList = Array.from(rooms.values())
-          .filter(room => !room.inactive)
-          .map(room => ({
-            id: room.id,
-            title: room.title,
-            host: room.host.username,
-            participants: room.participants.size
-          }));
-        sendTo(ws, { type: 'rooms_list', rooms: roomsList });
-        console.log('Sending rooms list:', roomsList);
-        break;
-
       case 'create_room':
         const roomId = uuidv4();
-        const newRoom = {
+        rooms.set(roomId, {
           id: roomId,
           title: data.title,
-          host: { id: ws.id, username: data.username },
-          participants: new Map([[ws.id, { ws, username: data.username }]]),
-          inactive: false
-        };
-        rooms.set(roomId, newRoom);
-        ws.roomId = roomId;
-        sendTo(ws, {
-          type: 'room_created',
-          roomId,
-          roomTitle: data.title,
-          participants: Array.from(newRoom.participants.values()).map(p => ({ id: p.ws.id, username: p.username }))
+          host: data.host,
+          participants: new Set([ws])
         });
+        ws.roomId = roomId;
+        sendTo(ws, { type: 'room_created', roomId });
+        broadcastRoomsList();
         console.log(`Room created: ${roomId}`);
         break;
 
       case 'join_room':
         const room = rooms.get(data.roomId);
         if (room) {
-          room.participants.set(ws.id, { ws, username: data.username });
+          room.participants.add(ws);
           ws.roomId = data.roomId;
-          room.inactive = false; // Reactivate the room if it was inactive
-          sendTo(ws, {
-            type: 'room_joined',
-            roomId: data.roomId,
-            roomTitle: room.title,
-            participants: Array.from(room.participants.values()).map(p => ({ id: p.ws.id, username: p.username }))
-          });
-          broadcastToRoom(data.roomId, {
-            type: 'new_participant',
-            id: ws.id,
-            username: data.username,
-            participants: Array.from(room.participants.values()).map(p => ({ id: p.ws.id, username: p.username }))
-          }, ws);
+          sendTo(ws, { type: 'room_joined', roomId: data.roomId, participants: room.participants.size });
+          broadcastToRoom(data.roomId, { type: 'new_participant', id: ws.id, participants: room.participants.size }, ws);
           console.log(`User ${ws.id} joined room ${data.roomId}`);
+          broadcastRoomsList();
         } else {
           sendTo(ws, { type: 'error', message: 'Room not found' });
           console.log(`Failed to join room: ${data.roomId} - Room not found`);
         }
+        break;
+
+      case 'get_rooms':
+        sendRoomsList(ws);
         break;
 
       case 'offer':
@@ -103,11 +78,12 @@ wss.on('connection', (ws) => {
       case 'ice_candidate':
         const targetRoom = rooms.get(ws.roomId);
         if (targetRoom) {
-          const targetParticipant = targetRoom.participants.get(data.targetId);
-          if (targetParticipant) {
-            sendTo(targetParticipant.ws, { ...data, senderId: ws.id });
-            console.log(`Forwarded ${data.type} from ${ws.id} to ${data.targetId}`);
-          }
+          targetRoom.participants.forEach(client => {
+            if (client !== ws && client.id === data.targetId) {
+              sendTo(client, { ...data, senderId: ws.id });
+              console.log(`Forwarded ${data.type} from ${ws.id} to ${data.targetId}`);
+            }
+          });
         }
         break;
 
@@ -129,34 +105,42 @@ wss.on('connection', (ws) => {
 function handleLeaveRoom(ws) {
   const room = rooms.get(ws.roomId);
   if (room) {
-    room.participants.delete(ws.id);
+    room.participants.delete(ws);
     console.log(`User ${ws.id} left room ${ws.roomId}`);
     if (room.participants.size === 0) {
-      // Instead of deleting, mark the room as inactive
-      room.inactive = true;
-      console.log(`Room ${ws.roomId} marked as inactive`);
-      // Optionally, set a timeout to delete the room after a period of inactivity
-      setTimeout(() => {
-        if (room.inactive) {
-          rooms.delete(ws.roomId);
-          console.log(`Room ${ws.roomId} deleted due to inactivity`);
-        }
-      }, 5 * 60 * 1000); // 5 minutes
+      rooms.delete(ws.roomId);
+      console.log(`Room ${ws.roomId} deleted`);
     } else {
-      if (room.host.id === ws.id) {
-        const newHost = room.participants.values().next().value;
-        room.host = { id: newHost.ws.id, username: newHost.username };
-      }
-      broadcastToRoom(ws.roomId, {
-        type: 'participant_left',
-        id: ws.id,
-        participants: Array.from(room.participants.values()).map(p => ({ id: p.ws.id, username: p.username })),
-        newHost: room.host
-      });
+      broadcastToRoom(ws.roomId, { type: 'participant_left', id: ws.id, participants: room.participants.size });
       console.log(`Notified remaining participants in room ${ws.roomId}`);
     }
+    broadcastRoomsList();
   }
   delete ws.roomId;
+}
+
+function sendRoomsList(ws) {
+  const roomsList = Array.from(rooms.values()).map(room => ({
+    id: room.id,
+    title: room.title,
+    host: room.host,
+    participants: room.participants.size
+  }));
+  sendTo(ws, { type: 'rooms_list', rooms: roomsList });
+}
+
+function broadcastRoomsList() {
+  const roomsList = Array.from(rooms.values()).map(room => ({
+    id: room.id,
+    title: room.title,
+    host: room.host,
+    participants: room.participants.size
+  }));
+  wss.clients.forEach(client => {
+    if (client.readyState === WebSocket.OPEN) {
+      sendTo(client, { type: 'rooms_list', rooms: roomsList });
+    }
+  });
 }
 
 const PORT = process.env.PORT || 3000;
