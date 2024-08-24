@@ -46,9 +46,8 @@ wss.on('connection', (ws) => {
           id: roomId,
           title: data.title,
           host: data.host,
-          participants: new Set([ws])
+          participants: new Set()
         });
-        ws.roomId = roomId;
         sendTo(ws, { type: 'room_created', roomId });
         broadcastRoomsList();
         console.log(`Room created: ${roomId}`);
@@ -59,8 +58,17 @@ wss.on('connection', (ws) => {
         if (room) {
           room.participants.add(ws);
           ws.roomId = data.roomId;
-          sendTo(ws, { type: 'room_joined', roomId: data.roomId, participants: room.participants.size });
-          broadcastToRoom(data.roomId, { type: 'new_participant', id: ws.id, participants: room.participants.size }, ws);
+          sendTo(ws, {
+            type: 'room_joined',
+            roomId: data.roomId,
+            participants: room.participants.size,
+            title: room.title
+          });
+          broadcastToRoom(data.roomId, {
+            type: 'new_participant',
+            id: ws.id,
+            participants: room.participants.size
+          });
           console.log(`User ${ws.id} joined room ${data.roomId}`);
           broadcastRoomsList();
         } else {
@@ -111,7 +119,11 @@ function handleLeaveRoom(ws) {
       rooms.delete(ws.roomId);
       console.log(`Room ${ws.roomId} deleted`);
     } else {
-      broadcastToRoom(ws.roomId, { type: 'participant_left', id: ws.id, participants: room.participants.size });
+      broadcastToRoom(ws.roomId, {
+        type: 'participant_left',
+        id: ws.id,
+        participants: room.participants.size
+      });
       console.log(`Notified remaining participants in room ${ws.roomId}`);
     }
     broadcastRoomsList();
