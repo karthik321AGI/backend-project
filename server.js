@@ -26,9 +26,7 @@ function broadcastToRoom(roomId, message, excludeClient = null) {
 
 wss.on('connection', (ws) => {
   console.log('New client connected');
-  ws.id = uuidv4();
-
-  ws.on('message', (message) => {
+  ws.id = uuidv4(); ws.on('message', (message) => {
     let data;
     try {
       data = JSON.parse(message);
@@ -44,7 +42,7 @@ wss.on('connection', (ws) => {
         const roomsList = Array.from(rooms.values()).map(room => ({
           id: room.id,
           title: room.title,
-          host: room.host,
+          host: room.host.username,
           participants: room.participants.size
         }));
         sendTo(ws, { type: 'rooms_list', rooms: roomsList });
@@ -55,8 +53,8 @@ wss.on('connection', (ws) => {
         const newRoom = {
           id: roomId,
           title: data.title,
-          host: ws.id,
-          participants: new Set([ws])
+          host: { id: ws.id, username: data.username },
+          participants: new Map([[ws.id, { ws, username: data.username }]])
         };
         rooms.set(roomId, newRoom);
         ws.roomId = roomId;
@@ -64,7 +62,7 @@ wss.on('connection', (ws) => {
           type: 'room_created',
           roomId,
           roomTitle: data.title,
-          participants: 1
+          participants: Array.from(newRoom.participants.values()).map(p => ({ id: p.ws.id, username: p.username }))
         });
         console.log(`Room created: ${roomId}`);
         break;
@@ -72,18 +70,19 @@ wss.on('connection', (ws) => {
       case 'join_room':
         const room = rooms.get(data.roomId);
         if (room) {
-          room.participants.add(ws);
+          room.participants.set(ws.id, { ws, username: data.username });
           ws.roomId = data.roomId;
           sendTo(ws, {
             type: 'room_joined',
             roomId: data.roomId,
             roomTitle: room.title,
-            participants: room.participants.size
+            participants: Array.from(room.participants.values()).map(p => ({ id: p.ws.id, username: p.username }))
           });
           broadcastToRoom(data.roomId, {
             type: 'new_participant',
             id: ws.id,
-            participants: room.participants.size
+            username: data.username,
+            participants: Array.from(room.participants.values()).map(p => ({ id: p.ws.id, username: p.username }))
           }, ws);
           console.log(`User ${ws.id} joined room ${data.roomId}`);
         } else {
@@ -97,12 +96,11 @@ wss.on('connection', (ws) => {
       case 'ice_candidate':
         const targetRoom = rooms.get(ws.roomId);
         if (targetRoom) {
-          targetRoom.participants.forEach(client => {
-            if (client !== ws && client.id === data.targetId) {
-              sendTo(client, { ...data, senderId: ws.id });
-              console.log(`Forwarded ${data.type} from ${ws.id} to ${data.targetId}`);
-            }
-          });
+          const targetParticipant = targetRoom.participants.get(data.targetId);
+          if (targetParticipant) {
+            sendTo(targetParticipant.ws, { ...data, senderId: ws.id });
+            console.log(`Forwarded ${data.type} from ${ws.id} to ${data.targetId}`);
+          }
         }
         break;
 
@@ -124,19 +122,20 @@ wss.on('connection', (ws) => {
 function handleLeaveRoom(ws) {
   const room = rooms.get(ws.roomId);
   if (room) {
-    room.participants.delete(ws);
+    room.participants.delete(ws.id);
     console.log(`User ${ws.id} left room ${ws.roomId}`);
     if (room.participants.size === 0) {
       rooms.delete(ws.roomId);
       console.log(`Room ${ws.roomId} deleted`);
     } else {
-      if (room.host === ws.id) {
-        room.host = Array.from(room.participants)[0].id;
+      if (room.host.id === ws.id) {
+        const newHost = room.participants.values().next().value;
+        room.host = { id: newHost.ws.id, username: newHost.username };
       }
       broadcastToRoom(ws.roomId, {
         type: 'participant_left',
         id: ws.id,
-        participants: room.participants.size,
+        participants: Array.from(room.participants.values()).map(p => ({ id: p.ws.id, username: p.username })),
         newHost: room.host
       });
       console.log(`Notified remaining participants in room ${ws.roomId}`);
