@@ -40,60 +40,33 @@ wss.on('connection', (ws) => {
     console.log('Received message:', data);
 
     switch (data.type) {
-      case 'get_rooms':
-        sendTo(ws, {
-          type: 'rooms_list',
-          rooms: Array.from(rooms.values()).map(room => ({
-            id: room.id,
-            title: room.title,
-            hostName: room.hostName,
-            participants: room.participants.map(p => ({ id: p.id, name: p.name }))
-          }))
-        });
-        break;
-
       case 'create_room':
         const roomId = uuidv4();
         rooms.set(roomId, {
           id: roomId,
-          title: data.title,
+          name: data.roomName,
           hostName: data.hostName,
-          participants: [{
-            id: ws.id,
-            name: data.hostName,
-            ws: ws
-          }]
+          participants: [{ id: ws.id, name: data.hostName, ws: ws }]
         });
         ws.roomId = roomId;
-        sendTo(ws, {
-          type: 'room_created',
-          roomId,
-          title: data.title,
-          participants: [{ id: ws.id, name: data.hostName }]
-        });
+        sendTo(ws, { type: 'room_created', roomId, participants: 1 });
         console.log(`Room created: ${roomId}`);
         break;
 
       case 'join_room':
         const room = rooms.get(data.roomId);
         if (room) {
-          room.participants.push({
-            id: ws.id,
-            name: data.userName,
-            ws: ws
-          });
+          room.participants.push({ id: ws.id, name: data.name, ws: ws });
           ws.roomId = data.roomId;
           sendTo(ws, {
             type: 'room_joined',
             roomId: data.roomId,
-            title: room.title,
             participants: room.participants.map(p => ({ id: p.id, name: p.name }))
           });
           broadcastToRoom(data.roomId, {
-            type: 'participant_joined',
-            participantId: ws.id,
-            userName: data.userName,
-            participants: room.participants.map(p => ({ id: p.id, name: p.name }))
+            type: 'new_participant',
+            id: ws.id,
+            name: data.name
           }, ws);
           console.log(`User ${ws.id} joined room ${data.roomId}`);
         } else {
@@ -119,6 +92,25 @@ wss.on('connection', (ws) => {
         handleLeaveRoom(ws);
         break;
 
+      case 'close_room':
+        const roomToClose = rooms.get(ws.roomId);
+        if (roomToClose && roomToClose.participants[0].id === ws.id) {
+          broadcastToRoom(ws.roomId, { type: 'room_closed' });
+          rooms.delete(ws.roomId);
+          console.log(`Room ${ws.roomId} closed by host`);
+        }
+        break;
+
+      case 'get_room_list':
+        const roomList = Array.from(rooms.values()).map(room => ({
+          id: room.id,
+          name: room.name,
+          hostName: room.hostName,
+          participants: room.participants.length
+        }));
+        sendTo(ws, { type: 'room_list', rooms: roomList });
+        break;
+
       default:
         console.log(`Unhandled message type: ${data.type}`);
     }
@@ -141,7 +133,7 @@ function handleLeaveRoom(ws) {
     } else {
       broadcastToRoom(ws.roomId, {
         type: 'participant_left',
-        participantId: ws.id,
+        id: ws.id,
         participants: room.participants.map(p => ({ id: p.id, name: p.name }))
       });
       console.log(`Notified remaining participants in room ${ws.roomId}`);
