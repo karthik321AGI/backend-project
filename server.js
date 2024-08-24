@@ -40,19 +40,6 @@ wss.on('connection', (ws) => {
     console.log('Received message:', data);
 
     switch (data.type) {
-      case 'create_room':
-        const roomId = uuidv4();
-        rooms.set(roomId, {
-          id: roomId,
-          title: data.title,
-          host: data.host,
-          participants: new Set([ws])
-        });
-        ws.roomId = roomId;
-        sendTo(ws, { type: 'room_created', roomId, title: data.title });
-        console.log(`Room created: ${roomId}`);
-        break;
-
       case 'get_rooms':
         const roomsList = Array.from(rooms.values()).map(room => ({
           id: room.id,
@@ -63,19 +50,42 @@ wss.on('connection', (ws) => {
         sendTo(ws, { type: 'rooms_list', rooms: roomsList });
         break;
 
+      case 'create_room':
+        const roomId = uuidv4();
+        const newRoom = {
+          id: roomId,
+          title: data.title,
+          host: ws.id,
+          participants: new Set([ws])
+        };
+        rooms.set(roomId, newRoom);
+        ws.roomId = roomId;
+        sendTo(ws, {
+          type: 'room_created',
+          roomId,
+          roomTitle: data.title,
+          participants: 1
+        });
+        console.log(`Room created: ${roomId}`);
+        break;
+
       case 'join_room':
         const room = rooms.get(data.roomId);
         if (room) {
           room.participants.add(ws);
           ws.roomId = data.roomId;
-          ws.username = data.username;
-          sendTo(ws, { type: 'room_joined', roomId: data.roomId, title: room.title });
+          sendTo(ws, {
+            type: 'room_joined',
+            roomId: data.roomId,
+            roomTitle: room.title,
+            participants: room.participants.size
+          });
           broadcastToRoom(data.roomId, {
             type: 'new_participant',
             id: ws.id,
-            username: data.username
+            participants: room.participants.size
           }, ws);
-          console.log(`User ${ws.id} (${data.username}) joined room ${data.roomId}`);
+          console.log(`User ${ws.id} joined room ${data.roomId}`);
         } else {
           sendTo(ws, { type: 'error', message: 'Room not found' });
           console.log(`Failed to join room: ${data.roomId} - Room not found`);
@@ -88,8 +98,8 @@ wss.on('connection', (ws) => {
         const targetRoom = rooms.get(ws.roomId);
         if (targetRoom) {
           targetRoom.participants.forEach(client => {
-            if (client.id === data.targetId) {
-              sendTo(client, { ...data, senderId: ws.id, senderUsername: ws.username });
+            if (client !== ws && client.id === data.targetId) {
+              sendTo(client, { ...data, senderId: ws.id });
               console.log(`Forwarded ${data.type} from ${ws.id} to ${data.targetId}`);
             }
           });
@@ -120,16 +130,19 @@ function handleLeaveRoom(ws) {
       rooms.delete(ws.roomId);
       console.log(`Room ${ws.roomId} deleted`);
     } else {
+      if (room.host === ws.id) {
+        room.host = Array.from(room.participants)[0].id;
+      }
       broadcastToRoom(ws.roomId, {
         type: 'participant_left',
         id: ws.id,
-        username: ws.username
+        participants: room.participants.size,
+        newHost: room.host
       });
       console.log(`Notified remaining participants in room ${ws.roomId}`);
     }
   }
   delete ws.roomId;
-  delete ws.username;
 }
 
 const PORT = process.env.PORT || 3000;
