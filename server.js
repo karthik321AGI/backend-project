@@ -26,7 +26,9 @@ function broadcastToRoom(roomId, message, excludeClient = null) {
 
 wss.on('connection', (ws) => {
   console.log('New client connected');
-  ws.id = uuidv4(); ws.on('message', (message) => {
+  ws.id = uuidv4();
+
+  ws.on('message', (message) => {
     let data;
     try {
       data = JSON.parse(message);
@@ -39,13 +41,16 @@ wss.on('connection', (ws) => {
 
     switch (data.type) {
       case 'get_rooms':
-        const roomsList = Array.from(rooms.values()).map(room => ({
-          id: room.id,
-          title: room.title,
-          host: room.host.username,
-          participants: room.participants.size
-        }));
+        const roomsList = Array.from(rooms.values())
+          .filter(room => !room.inactive)
+          .map(room => ({
+            id: room.id,
+            title: room.title,
+            host: room.host.username,
+            participants: room.participants.size
+          }));
         sendTo(ws, { type: 'rooms_list', rooms: roomsList });
+        console.log('Sending rooms list:', roomsList);
         break;
 
       case 'create_room':
@@ -54,7 +59,8 @@ wss.on('connection', (ws) => {
           id: roomId,
           title: data.title,
           host: { id: ws.id, username: data.username },
-          participants: new Map([[ws.id, { ws, username: data.username }]])
+          participants: new Map([[ws.id, { ws, username: data.username }]]),
+          inactive: false
         };
         rooms.set(roomId, newRoom);
         ws.roomId = roomId;
@@ -72,6 +78,7 @@ wss.on('connection', (ws) => {
         if (room) {
           room.participants.set(ws.id, { ws, username: data.username });
           ws.roomId = data.roomId;
+          room.inactive = false; // Reactivate the room if it was inactive
           sendTo(ws, {
             type: 'room_joined',
             roomId: data.roomId,
@@ -125,8 +132,16 @@ function handleLeaveRoom(ws) {
     room.participants.delete(ws.id);
     console.log(`User ${ws.id} left room ${ws.roomId}`);
     if (room.participants.size === 0) {
-      rooms.delete(ws.roomId);
-      console.log(`Room ${ws.roomId} deleted`);
+      // Instead of deleting, mark the room as inactive
+      room.inactive = true;
+      console.log(`Room ${ws.roomId} marked as inactive`);
+      // Optionally, set a timeout to delete the room after a period of inactivity
+      setTimeout(() => {
+        if (room.inactive) {
+          rooms.delete(ws.roomId);
+          console.log(`Room ${ws.roomId} deleted due to inactivity`);
+        }
+      }, 5 * 60 * 1000); // 5 minutes
     } else {
       if (room.host.id === ws.id) {
         const newHost = room.participants.values().next().value;
