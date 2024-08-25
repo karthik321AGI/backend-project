@@ -72,20 +72,6 @@ wss.on('connection', (ws) => {
           participants: [{ id: ws.id, name: data.hostName }]
         });
         console.log(`Room created: ${roomId}`);
-        // Broadcast updated room list to all connected clients
-        wss.clients.forEach(client => {
-          if (client.readyState === WebSocket.OPEN) {
-            sendTo(client, {
-              type: 'rooms_list',
-              rooms: Array.from(rooms.values()).map(room => ({
-                id: room.id,
-                title: room.title,
-                hostName: room.hostName,
-                participants: room.participants.map(p => ({ id: p.id, name: p.name }))
-              }))
-            });
-          }
-        });
         break;
 
       case 'join_room':
@@ -160,21 +146,6 @@ function handleLeaveRoom(ws) {
       });
       console.log(`Notified remaining participants in room ${ws.roomId}`);
     }
-
-    // Broadcast updated room list to all connected clients
-    wss.clients.forEach(client => {
-      if (client.readyState === WebSocket.OPEN) {
-        sendTo(client, {
-          type: 'rooms_list',
-          rooms: Array.from(rooms.values()).map(room => ({
-            id: room.id,
-            title: room.title,
-            hostName: room.hostName,
-            participants: room.participants.map(p => ({ id: p.id, name: p.name }))
-          }))
-        });
-      }
-    });
   }
   delete ws.roomId;
 }
