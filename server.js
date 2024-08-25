@@ -148,7 +148,7 @@ function handleLeaveRoom(ws) {
   if (room) {
     room.participants = room.participants.filter(p => p.id !== ws.id);
     console.log(`User ${ws.id} left room ${ws.roomId}`);
-    if (room.participants.length === 0 && room.hostId !== ws.id) {
+    if (room.participants.length === 0) {
       rooms.delete(ws.roomId);
       console.log(`Room ${ws.roomId} deleted`);
     } else {
