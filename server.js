@@ -13,6 +13,14 @@ function sendTo(ws, message) {
   ws.send(JSON.stringify(message));
 }
 
+function broadcastToAll(message) {
+  wss.clients.forEach(client => {
+    if (client.readyState === WebSocket.OPEN) {
+      sendTo(client, message);
+    }
+  });
+}
+
 function broadcastToRoom(roomId, message, excludeClient = null) {
   const room = rooms.get(roomId);
   if (room) {
@@ -22,6 +30,18 @@ function broadcastToRoom(roomId, message, excludeClient = null) {
       }
     });
   }
+}
+
+function updateRoomsList() {
+  broadcastToAll({
+    type: 'rooms_list',
+    rooms: Array.from(rooms.values()).map(room => ({
+      id: room.id,
+      title: room.title,
+      hostName: room.hostName,
+      participants: room.participants.map(p => ({ id: p.id, name: p.name }))
+    }))
+  });
 }
 
 wss.on('connection', (ws) => {
@@ -41,15 +61,7 @@ wss.on('connection', (ws) => {
 
     switch (data.type) {
       case 'get_rooms':
-        sendTo(ws, {
-          type: 'rooms_list',
-          rooms: Array.from(rooms.values()).map(room => ({
-            id: room.id,
-            title: room.title,
-            hostName: room.hostName,
-            participants: room.participants.map(p => ({ id: p.id, name: p.name }))
-          }))
-        });
+        updateRoomsList();
         break;
 
       case 'create_room':
@@ -72,6 +84,7 @@ wss.on('connection', (ws) => {
           participants: [{ id: ws.id, name: data.hostName }]
         });
         console.log(`Room created: ${roomId}`);
+        updateRoomsList();
         break;
 
       case 'join_room':
@@ -96,6 +109,7 @@ wss.on('connection', (ws) => {
             participants: room.participants.map(p => ({ id: p.id, name: p.name }))
           }, ws);
           console.log(`User ${ws.id} joined room ${data.roomId}`);
+          updateRoomsList();
         } else {
           sendTo(ws, { type: 'error', message: 'Room not found' });
           console.log(`Failed to join room: ${data.roomId} - Room not found`);
@@ -146,6 +160,7 @@ function handleLeaveRoom(ws) {
       });
       console.log(`Notified remaining participants in room ${ws.roomId}`);
     }
+    updateRoomsList();
   }
   delete ws.roomId;
 }
