@@ -132,6 +132,18 @@ wss.on('connection', (ws) => {
         handleLeaveRoom(ws);
         break;
 
+      case 'speaking_start':
+      case 'speaking_stop':
+        const speakingRoom = rooms.get(data.roomId);
+        if (speakingRoom) {
+          broadcastToRoom(data.roomId, {
+            type: 'active_speaker',
+            speakerId: ws.id,
+            isSpeaking: data.type === 'speaking_start'
+          });
+        }
+        break;
+
       default:
         console.log(`Unhandled message type: ${data.type}`);
     }
