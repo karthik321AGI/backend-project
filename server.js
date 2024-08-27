@@ -33,16 +33,29 @@ function broadcastToRoom(roomId, message, excludeClient = null) {
 }
 
 function updateRoomsList() {
-  broadcastToAll({
-    type: 'rooms_list',
-    rooms: Array.from(rooms.values()).map(room => ({
-      id: room.id,
-      title: room.title,
-      hostName: room.hostName,
-      participants: room.participants.map(p => ({ id: p.id, name: p.name }))
-    }))
+  const roomList = Array.from(rooms.values()).map(room => ({
+    id: room.id,
+    title: room.title,
+    hostName: room.hostName,
+    participants: room.participants.map(p => ({ id: p.id, name: p.name }))
+  }));
+
+  wss.clients.forEach(client => {
+    if (client.readyState === WebSocket.OPEN) {
+      sendTo(client, {
+        type: 'rooms_list',
+        rooms: roomList
+      });
+    }
   });
 }
+
+function periodicRoomUpdate() {
+  updateRoomsList();
+}
+
+// Call this function every 5 seconds
+setInterval(periodicRoomUpdate, 5000);
 
 wss.on('connection', (ws) => {
   console.log('New client connected');
@@ -66,24 +79,19 @@ wss.on('connection', (ws) => {
 
       case 'create_room':
         const roomId = uuidv4();
-        const newRoom = {
+        rooms.set(roomId, {
           id: roomId,
           title: data.title,
           hostName: data.hostName,
           hostId: ws.id,
-          participants: [{
-            id: ws.id,
-            name: data.hostName,
-            ws: ws
-          }]
-        };
-        rooms.set(roomId, newRoom);
+          participants: []
+        });
         ws.roomId = roomId;
         sendTo(ws, {
           type: 'room_created',
           roomId,
           title: data.title,
-          participants: newRoom.participants.map(p => ({ id: p.id, name: p.name }))
+          participants: []
         });
         console.log(`Room created: ${roomId}`);
         updateRoomsList();
@@ -92,31 +100,34 @@ wss.on('connection', (ws) => {
       case 'join_room':
         const room = rooms.get(data.roomId);
         if (room) {
-          if (!room.participants.some(p => p.id === ws.id)) {
-            const participant = {
-              id: ws.id,
-              name: data.userName,
-              ws: ws
-            };
-            room.participants.push(participant);
-            ws.roomId = data.roomId;
-            sendTo(ws, {
-              type: 'room_joined',
-              roomId: data.roomId,
-              title: room.title,
-              participants: room.participants.map(p => ({ id: p.id, name: p.name }))
-            });
-            broadcastToRoom(data.roomId, {
-              type: 'participant_joined',
-              participantId: ws.id,
-              userName: participant.name,
-              participants: room.participants.map(p => ({ id: p.id, name: p.name }))
-            }, ws);
-            console.log(`User ${ws.id} joined room ${data.roomId}`);
-            updateRoomsList();
-          } else {
-            console.log(`User ${ws.id} already in room ${data.roomId}`);
+          const existingParticipant = room.participants.find(p => p.name === data.userName);
+          if (existingParticipant) {
+            sendTo(ws, { type: 'error', message: 'Username already exists in this room' });
+            return;
           }
+
+          const isHost = room.hostId === ws.id;
+          const participant = {
+            id: ws.id,
+            name: isHost ? room.hostName : data.userName,
+            ws: ws
+          };
+          room.participants.push(participant);
+          ws.roomId = data.roomId;
+          sendTo(ws, {
+            type: 'room_joined',
+            roomId: data.roomId,
+            title: room.title,
+            participants: room.participants.map(p => ({ id: p.id, name: p.name }))
+          });
+          broadcastToRoom(data.roomId, {
+            type: 'participant_joined',
+            participantId: ws.id,
+            userName: participant.name,
+            participants: room.participants.map(p => ({ id: p.id, name: p.name }))
+          }, ws);
+          console.log(`User ${ws.id} joined room ${data.roomId}`);
+          updateRoomsList();
         } else {
           sendTo(ws, { type: 'error', message: 'Room not found' });
           console.log(`Failed to join room: ${data.roomId} - Room not found`);
