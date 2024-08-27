@@ -27,25 +27,22 @@ wss.on('connection', (ws) => {
           id: uuidv4(),
           title: data.title,
           hostName: data.hostName,
-          participants: []
+          participants: [{
+            id: ws.id,
+            name: data.hostName
+          }]
         };
         rooms.push(newRoom);
+        ws.roomId = newRoom.id;  // Assign room ID to the websocket
 
-        // Immediately add the creator to the room
-        const creatorParticipant = {
-          id: ws.id,
-          name: data.hostName
-        };
-        newRoom.participants.push(creatorParticipant);
-
-        // Send the updated room list to all clients
-        broadcastRoomsList();
-
-        // Send a 'room_created' event to the creator
+        // Send the created room to the host
         ws.send(JSON.stringify({
           type: 'room_created',
           room: newRoom
         }));
+
+        // Broadcast updated room list to all clients
+        broadcastRoomsList();
         break;
 
       case 'join_room':
@@ -57,14 +54,17 @@ wss.on('connection', (ws) => {
           };
 
           // Check if the participant is already in the room
-          const existingParticipant = roomToJoin.participants.find(p => p.id === ws.id);
-          if (!existingParticipant) {
+          const existingParticipantIndex = roomToJoin.participants.findIndex(p => p.id === ws.id);
+          if (existingParticipantIndex === -1) {
             roomToJoin.participants.push(participant);
+          } else {
+            // Update the existing participant's name if it has changed
+            roomToJoin.participants[existingParticipantIndex].name = data.userName;
           }
 
           ws.roomId = data.roomId;
 
-          // Notify all clients in the room about the new participant
+          // Notify all clients in the room about the new/updated participant
           broadcastToRoom(roomToJoin.id, {
             type: 'participant_joined',
             participant: participant
@@ -76,7 +76,7 @@ wss.on('connection', (ws) => {
             room: roomToJoin
           }));
 
-          // Update the room list for all clients
+          // Broadcast updated room list to all clients
           broadcastRoomsList();
         }
         break;
