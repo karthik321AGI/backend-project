@@ -128,6 +128,18 @@ wss.on('connection', (ws) => {
         }
         break;
 
+      case 'active_speaker':
+        const speakerRoom = rooms.get(ws.roomId);
+        if (speakerRoom) {
+          broadcastToRoom(ws.roomId, {
+            type: 'active_speaker',
+            participantId: data.participantId,
+            isActive: data.isActive
+          });
+          console.log(`Broadcasted active speaker status for ${data.participantId} in room ${ws.roomId}`);
+        }
+        break;
+
       case 'leave_room':
         handleLeaveRoom(ws);
         break;
@@ -148,7 +160,7 @@ function handleLeaveRoom(ws) {
   if (room) {
     room.participants = room.participants.filter(p => p.id !== ws.id);
     console.log(`User ${ws.id} left room ${ws.roomId}`);
-    if (room.participants.length === 0 && room.hostId !== ws.id) {
+    if (room.participants.length === 0) {
       rooms.delete(ws.roomId);
       console.log(`Room ${ws.roomId} deleted`);
     } else {
