@@ -50,8 +50,25 @@ function updateRoomsList() {
   });
 }
 
+function broadcastRoomDetails(roomId) {
+  const room = rooms.get(roomId);
+  if (room) {
+    const roomDetails = {
+      id: room.id,
+      title: room.title,
+      hostName: room.hostName,
+      participants: room.participants.map(p => ({ id: p.id, name: p.name }))
+    };
+    broadcastToRoom(roomId, {
+      type: 'room_details_update',
+      room: roomDetails
+    });
+  }
+}
+
 function periodicRoomUpdate() {
   updateRoomsList();
+  rooms.forEach((room, roomId) => broadcastRoomDetails(roomId));
 }
 
 // Call this function every 5 seconds
@@ -100,7 +117,7 @@ wss.on('connection', (ws) => {
       case 'join_room':
         const room = rooms.get(data.roomId);
         if (room) {
-          const existingParticipant = room.participants.find(p => p.name === data.userName);
+          const existingParticipant = room.participants.find(p => p.name.toLowerCase() === data.userName.toLowerCase());
           if (existingParticipant) {
             sendTo(ws, { type: 'error', message: 'Username already exists in this room' });
             return;
@@ -128,6 +145,7 @@ wss.on('connection', (ws) => {
           }, ws);
           console.log(`User ${ws.id} joined room ${data.roomId}`);
           updateRoomsList();
+          broadcastRoomDetails(data.roomId);
         } else {
           sendTo(ws, { type: 'error', message: 'Room not found' });
           console.log(`Failed to join room: ${data.roomId} - Room not found`);
@@ -177,6 +195,7 @@ function handleLeaveRoom(ws) {
         participants: room.participants.map(p => ({ id: p.id, name: p.name }))
       });
       console.log(`Notified remaining participants in room ${ws.roomId}`);
+      broadcastRoomDetails(ws.roomId);
     }
     updateRoomsList();
   }
