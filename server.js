@@ -44,6 +44,15 @@ function updateRoomsList() {
   });
 }
 
+function closeRoomIfEmpty(roomId) {
+  const room = rooms.get(roomId);
+  if (room && room.participants.length === 0) {
+    rooms.delete(roomId);
+    console.log(`Room ${roomId} closed due to inactivity`);
+    updateRoomsList();
+  }
+}
+
 wss.on('connection', (ws) => {
   console.log('New client connected');
   ws.id = uuidv4();
@@ -80,13 +89,16 @@ wss.on('connection', (ws) => {
         rooms.set(roomId, newRoom);
         ws.roomId = roomId;
         sendTo(ws, {
-          type: 'room_created',
+          type: 'room_joined',
           roomId,
           title: data.title,
           participants: newRoom.participants.map(p => ({ id: p.id, name: p.name }))
         });
         console.log(`Room created: ${roomId}`);
         updateRoomsList();
+
+        // Set a timer to close the room if no one joins within 2 minutes
+        setTimeout(() => closeRoomIfEmpty(roomId), 120000);
         break;
 
       case 'join_room':
