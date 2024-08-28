@@ -45,12 +45,14 @@ function updateRoomsList() {
 }
 
 function closeRoomIfEmpty(roomId) {
-  const room = rooms.get(roomId);
-  if (room && room.participants.length === 0) {
-    rooms.delete(roomId);
-    console.log(`Room ${roomId} closed due to inactivity`);
-    updateRoomsList();
-  }
+  setTimeout(() => {
+    const room = rooms.get(roomId);
+    if (room && room.participants.length === 0) {
+      rooms.delete(roomId);
+      console.log(`Room ${roomId} closed due to inactivity`);
+      updateRoomsList();
+    }
+  }, 120000); // 2 minutes
 }
 
 wss.on('connection', (ws) => {
@@ -75,30 +77,22 @@ wss.on('connection', (ws) => {
 
       case 'create_room':
         const roomId = uuidv4();
-        const newRoom = {
+        rooms.set(roomId, {
           id: roomId,
           title: data.title,
           hostName: data.hostName,
           hostId: ws.id,
-          participants: [{
-            id: ws.id,
-            name: data.hostName,
-            ws: ws
-          }]
-        };
-        rooms.set(roomId, newRoom);
-        ws.roomId = roomId;
+          participants: []
+        });
         sendTo(ws, {
-          type: 'room_joined',
+          type: 'room_created',
           roomId,
           title: data.title,
-          participants: newRoom.participants.map(p => ({ id: p.id, name: p.name }))
+          participants: []
         });
         console.log(`Room created: ${roomId}`);
         updateRoomsList();
-
-        // Set a timer to close the room if no one joins within 2 minutes
-        setTimeout(() => closeRoomIfEmpty(roomId), 120000);
+        closeRoomIfEmpty(roomId);
         break;
 
       case 'join_room':
@@ -106,7 +100,7 @@ wss.on('connection', (ws) => {
         if (room) {
           const participant = {
             id: ws.id,
-            name: data.userName,
+            name: ws.id === room.hostId ? room.hostName : data.userName,
             ws: ws
           };
           room.participants.push(participant);
