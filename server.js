@@ -155,20 +155,30 @@ wss.on('connection', (ws) => {
         break;
 
       case 'emoji_reaction':
-        broadcastToRoom(data.roomId, {
-          type: 'emoji_reaction',
-          participantId: ws.id,
-          emoji: data.emoji
-        });
-        break;
-      case 'chat_message':
-        broadcastToRoom(data.roomId, {
-          type: 'chat_message',
-          sender: data.sender,
-          message: data.message
-        });
+        const emojiRoom = rooms.get(data.roomId);
+        if (emojiRoom) {
+          broadcastToRoom(data.roomId, {
+            type: 'emoji_reaction',
+            participantId: ws.id,
+            emoji: data.emoji
+          });
+          console.log(`Broadcasted emoji reaction from ${ws.id} in room ${data.roomId}`);
+        }
         break;
 
+      case 'chat_message':
+        const chatRoom = rooms.get(data.roomId);
+        if (chatRoom) {
+          const sender = chatRoom.participants.find(p => p.id === ws.id);
+          broadcastToRoom(data.roomId, {
+            type: 'chat_message',
+            senderId: ws.id,
+            senderName: sender ? sender.name : 'Unknown',
+            message: data.message
+          });
+          console.log(`Broadcasted chat message from ${ws.id} in room ${data.roomId}`);
+        }
+        break;
 
       default:
         console.log(`Unhandled message type: ${data.type}`);
