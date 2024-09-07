@@ -174,7 +174,8 @@ wss.on('connection', (ws) => {
             type: 'chat_message',
             participantId: ws.id,
             participantName: sender ? sender.name : 'Unknown',
-            message: data.message
+            message: data.message,
+            timestamp: Date.now()
           });
           console.log(`Broadcasted chat message from ${ws.id} in room ${ws.roomId}`);
         }
