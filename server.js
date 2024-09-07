@@ -169,10 +169,11 @@ wss.on('connection', (ws) => {
       case 'chat_message':
         const chatRoom = rooms.get(ws.roomId);
         if (chatRoom) {
+          const sender = chatRoom.participants.find(p => p.id === ws.id);
           broadcastToRoom(ws.roomId, {
             type: 'chat_message',
             participantId: ws.id,
-            participantName: chatRoom.participants.find(p => p.id === ws.id).name,
+            participantName: sender ? sender.name : 'Unknown',
             message: data.message
           });
           console.log(`Broadcasted chat message from ${ws.id} in room ${ws.roomId}`);
