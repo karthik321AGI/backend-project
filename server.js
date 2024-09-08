@@ -39,7 +39,11 @@ function updateRoomsList() {
       id: room.id,
       title: room.title,
       hostName: room.hostName,
-      participants: room.participants.map(p => ({ id: p.id, name: p.name }))
+      participants: room.participants.map(p => ({
+        id: p.id,
+        name: p.name,
+        isHost: p.id === room.hostId
+      }))
     }))
   });
 }
@@ -109,13 +113,22 @@ wss.on('connection', (ws) => {
             type: 'room_joined',
             roomId: data.roomId,
             title: room.title,
-            participants: room.participants.map(p => ({ id: p.id, name: p.name }))
+            participants: room.participants.map(p => ({
+              id: p.id,
+              name: p.name,
+              isHost: p.id === room.hostId
+            }))
           });
           broadcastToRoom(data.roomId, {
             type: 'participant_joined',
             participantId: ws.id,
             userName: participant.name,
-            participants: room.participants.map(p => ({ id: p.id, name: p.name }))
+            isHost: ws.id === room.hostId,
+            participants: room.participants.map(p => ({
+              id: p.id,
+              name: p.name,
+              isHost: p.id === room.hostId
+            }))
           }, ws);
           console.log(`User ${ws.id} joined room ${data.roomId}`);
           updateRoomsList();
@@ -181,12 +194,8 @@ wss.on('connection', (ws) => {
         }
         break;
 
-
       default:
         console.log(`Unhandled message type: ${data.type}`);
-
-
-
     }
   });
 
@@ -208,7 +217,11 @@ function handleLeaveRoom(ws) {
       broadcastToRoom(ws.roomId, {
         type: 'participant_left',
         participantId: ws.id,
-        participants: room.participants.map(p => ({ id: p.id, name: p.name }))
+        participants: room.participants.map(p => ({
+          id: p.id,
+          name: p.name,
+          isHost: p.id === room.hostId
+        }))
       });
       console.log(`Notified remaining participants in room ${ws.roomId}`);
     }
