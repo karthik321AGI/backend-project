@@ -85,14 +85,23 @@ wss.on('connection', (ws) => {
           id: roomId,
           title: data.title,
           hostName: data.hostName,
-          hostId: ws.id,
+          hostId: ws.id,  // Store the host's WebSocket ID
           participants: []
+        });
+        rooms.get(roomId).participants.push({
+          id: ws.id,
+          name: data.hostName,
+          ws: ws
         });
         sendTo(ws, {
           type: 'room_created',
           roomId,
           title: data.title,
-          participants: []
+          participants: [{
+            id: ws.id,
+            name: data.hostName,
+            isHost: true
+          }]
         });
         console.log(`Room created: ${roomId}`);
         updateRoomsList();
@@ -192,6 +201,10 @@ wss.on('connection', (ws) => {
           });
           console.log(`Broadcasted chat message from ${ws.id} in room ${ws.roomId}`);
         }
+        break;
+
+      case 'set_id':
+        sendTo(ws, { type: 'set_id', id: ws.id });
         break;
 
       default:
